@@ -1,0 +1,263 @@
+@Tag("integration")
+@SpringBootTest
+@Transactional
+@Sql("/db-test/data/BenPlanRateServiceIT/BenPlanRateServiceIT.sql")
+class BenPlanRateServiceIT {
+
+    private static final String PROSPECT_ID = "IT-BenPlanRateService-Company-01";
+    private static final String NON_EXISTENT_PROSPECT_ID = "IT-BenPlanRateService-Company-02";
+
+    @Autowired
+    private BenPlanRateService benPlanRateService;
+
+    @Autowired
+    private BenPlanRateRepository benPlanRateRepository;
+
+    @Autowired
+    private ProspectPlanRepository prospectPlanRepository;
+
+    @Autowired
+    private EntityManager entityManager;
+
+    private ProspectPlan testProspectPlan;
+
+    @BeforeEach
+    void setUp() {
+        testProspectPlan = prospectPlanRepository.findByProspectId(PROSPECT_ID)
+                .stream()
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "SQL fixture did not create a prospect plan for " + PROSPECT_ID));
+    }
+
+    private BenPlanRate createTestBenPlanRate() {
+        BenPlanRateDetail detail1 = BenPlanRateDetail.builder()
+                .planRateDetailPK(BenPlanRateDetailPK.builder().planRateTypeId(1).rateKey("1").build())
+                .planCost(BigDecimal.valueOf(10.00))
+                .benPlanRate(null)
+                .build();
+        BenPlanRateDetail detail2 = BenPlanRateDetail.builder()
+                .planRateDetailPK(BenPlanRateDetailPK.builder().planRateTypeId(1).rateKey("2").build())
+                .planCost(BigDecimal.valueOf(10.10))
+                .benPlanRate(null)
+                .build();
+
+        BenPlanRate testBenPlanRate = BenPlanRate.builder()
+                .planId(testProspectPlan.getId())
+                .rateTypeCode("COVG_LEVEL")
+                .planRateDetail(List.of(detail1, detail2))
+                .build();
+
+        for (BenPlanRateDetail detail : testBenPlanRate.getPlanRateDetail()) {
+            detail.setBenPlanRate(testBenPlanRate);
+        }
+        return testBenPlanRate;
+    }
+
+    @Test
+    @DisplayName("Given a valid BenPlanRate " +
+            "When saveBenPlanRate is called " +
+            "Then the benefit plan rate is saved and returned with a generated ID")
+    void saveBenPlanRateTest() {
+        // When
+        BenPlanRate savedBenPlanRate = benPlanRateService.saveBenPlanRate(createTestBenPlanRate());
+
+        // Then
+        assertNotNull(savedBenPlanRate.getId());
+        assertEquals(testProspectPlan.getId(), savedBenPlanRate.getPlanId());
+        assertEquals("COVG_LEVEL", savedBenPlanRate.getRateTypeCode());
+        assertNotNull(savedBenPlanRate.getPlanRateDetail());
+        assertEquals(2, savedBenPlanRate.getPlanRateDetail().size());
+        assertEquals(BigDecimal.valueOf(10.00), savedBenPlanRate.getPlanRateDetail().get(0).getPlanCost());
+        assertEquals(BigDecimal.valueOf(10.10), savedBenPlanRate.getPlanRateDetail().get(1).getPlanCost());
+
+        entityManager.flush();
+        Integer savedId = savedBenPlanRate.getId();
+        entityManager.clear();
+
+        BenPlanRate fromDb = benPlanRateRepository.findById(savedId).orElseThrow();
+        assertEquals(savedBenPlanRate.getId(), fromDb.getId());
+        assertNotNull(fromDb.getProspectPlan());
+        assertEquals(testProspectPlan.getId(), fromDb.getProspectPlan().getId());
+        assertEquals(PROSPECT_ID, fromDb.getProspectPlan().getProspectId());
+    }
+
+    @Test
+    @DisplayName("Given a list of valid plan IDs " +
+            "When getBenPlanRatesBy is called with plan IDs " +
+            "Then the benefit plan rates are returned")
+    void getBenPlanRatesByPlanIdsTest() {
+        // Given
+        benPlanRateRepository.save(createTestBenPlanRate());
+
+        // When
+        List<BenPlanRate> result = benPlanRateService.getBenPlanRatesBy(List.of(testProspectPlan.getId()));
+
+        // Then
+        assertNotNull(result);
+        assertEquals(1, result.size());
+        BenPlanRate benPlanRate = result.get(0);
+        assertEquals(testProspectPlan.getId(), benPlanRate.getPlanId());
+        assertEquals("COVG_LEVEL", benPlanRate.getRateTypeCode());
+        assertNotNull(benPlanRate.getPlanRateDetail());
+        assertEquals(2, benPlanRate.getPlanRateDetail().size());
+    }
+
+    @Test
+    @DisplayName("Given a list of plan IDs with no matching records " +
+            "When getBenPlanRatesBy is called " +
+            "Then an empty list is returned")
+    void getBenPlanRatesByPlanIdsEmptyTest() {
+        // When
+        List<BenPlanRate> result = benPlanRateService.getBenPlanRatesBy(List.of(999));
+
+        // Then
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("Given a saved BenPlanRate " +
+            "When deleteBenPlanRates is called " +
+            "Then the benefit plan rate is deleted from the database")
+    void deleteBenPlanRatesTest() {
+        // Given
+        BenPlanRate saved = benPlanRateRepository.saveAndFlush(createTestBenPlanRate());
+        assertNotNull(saved.getId());
+
+        // When
+        benPlanRateService.deleteBenPlanRates(List.of(saved.getPlanId()));
+        entityManager.flush();
+        entityManager.clear();
+
+        // Then
+        List<BenPlanRate> result = benPlanRateRepository.findBenPlanRatesBy(List.of(saved.getPlanId()));
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("Given a prospect ID with associated benefit plan rates " +
+            "When getBenPlanRatesBy is called with the prospect ID " +
+            "Then a map of plan ID to PlanRateDto is returned")
+    void getBenPlanRatesByProspectIdTest() {
+        // Given
+        benPlanRateRepository.save(createTestBenPlanRate());
+
+        // When
+        Map<Integer, PlanRateDto> result = benPlanRateService.getBenPlanRatesBy(PROSPECT_ID);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(1, result.size());
+        PlanRateDto planRateDto = result.get(testProspectPlan.getId());
+        assertNotNull(planRateDto);
+        assertEquals(testProspectPlan.getId(), planRateDto.getPlanId());
+        assertEquals("COVG_LEVEL", planRateDto.getRateTypeCode());
+        assertNotNull(planRateDto.getCost());
+        assertEquals(2, planRateDto.getCost().size());
+        assertEquals(BigDecimal.valueOf(10.00), planRateDto.getCost().get("1"));
+        assertEquals(BigDecimal.valueOf(10.10), planRateDto.getCost().get("2"));
+    }
+
+    @Test
+    @DisplayName("Given a prospect ID with no associated benefit plan rates " +
+            "When getBenPlanRatesBy is called " +
+            "Then an empty map is returned")
+    void getBenPlanRatesByProspectIdEmptyTest() {
+        // When
+        Map<Integer, PlanRateDto> result = benPlanRateService.getBenPlanRatesBy(NON_EXISTENT_PROSPECT_ID);
+
+        // Then
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("Given a plan rate detail with a null cost " +
+            "When rates are retrieved by prospect ID " +
+            "Then the cost is returned as zero")
+    void getBenPlanRatesByProspectIdNullCostTest() {
+        BenPlanRateDetail nullCostDetail = BenPlanRateDetail.builder()
+                .planRateDetailPK(BenPlanRateDetailPK.builder().planRateTypeId(1).rateKey("1").build())
+                .planCost(null)
+                .build();
+        BenPlanRate nullCostRate = BenPlanRate.builder()
+                .planId(testProspectPlan.getId())
+                .rateTypeCode("COVG_LEVEL")
+                .planRateDetail(List.of(nullCostDetail))
+                .build();
+        nullCostDetail.setBenPlanRate(nullCostRate);
+        benPlanRateRepository.saveAndFlush(nullCostRate);
+
+        // When
+        Map<Integer, PlanRateDto> result = benPlanRateService.getBenPlanRatesBy(PROSPECT_ID);
+
+        // Then
+        assertNotNull(result.get(testProspectPlan.getId()));
+        assertEquals(BigDecimal.ZERO,
+                result.get(testProspectPlan.getId()).getCost().get("1"));
+    }
+
+    @Test
+    @DisplayName("Given a list of plan IDs and a rate type " +
+            "When getPlanIdToCvgCodeCostMapping is called " +
+            "Then a map of plan ID to cost map is returned")
+    void getPlanIdToCvgCodeCostMappingTest() {
+        // Given
+        benPlanRateRepository.save(createTestBenPlanRate());
+
+        // When
+        Map<Integer, Map<String, BigDecimal>> result = benPlanRateService.getPlanIdToCvgCodeCostMapping(List.of(testProspectPlan.getId()), "COVG_LEVEL");
+
+        // Then
+        assertNotNull(result);
+        assertEquals(1, result.size());
+        Map<String, BigDecimal> costMap = result.get(testProspectPlan.getId());
+        assertNotNull(costMap);
+        assertEquals(2, costMap.size());
+        assertEquals(BigDecimal.valueOf(10.00), costMap.get("1"));
+        assertEquals(BigDecimal.valueOf(10.10), costMap.get("2"));
+    }
+
+    @Test
+    @DisplayName("Given a list of plan IDs with no matching rate type " +
+            "When getPlanIdToCvgCodeCostMapping is called " +
+            "Then an empty map is returned")
+    void getPlanIdToCvgCodeCostMappingEmptyTest() {
+        // Given
+        benPlanRateRepository.save(createTestBenPlanRate());
+
+        // When
+        Map<Integer, Map<String, BigDecimal>> result = benPlanRateService.getPlanIdToCvgCodeCostMapping(List.of(testProspectPlan.getId()), "UNKNOWN");
+
+        // Then
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("Given a BenPlanRate with an invalid plan ID " +
+            "When saveBenPlanRate is called " +
+            "Then a DataIntegrityViolationException is thrown")
+    void saveBenPlanRateInvalidPlanIdTest() {
+        // Given
+        BenPlanRateDetail detail = BenPlanRateDetail.builder()
+                .planRateDetailPK(BenPlanRateDetailPK.builder().planRateTypeId(1).rateKey("1").build())
+                .planCost(BigDecimal.valueOf(10.00))
+                .benPlanRate(null)
+                .build();
+        BenPlanRate invalidBenPlanRate = BenPlanRate.builder()
+                .planId(0)
+                .rateTypeCode("COVG_LEVEL")
+                .planRateDetail(List.of(detail))
+                .build();
+        detail.setBenPlanRate(invalidBenPlanRate);
+
+        // When/Then
+        assertThrows(DataIntegrityViolationException.class, () -> {
+            benPlanRateService.saveBenPlanRate(invalidBenPlanRate);
+            benPlanRateRepository.flush();
+        });
+    }
+
+}
