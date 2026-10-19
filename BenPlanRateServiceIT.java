@@ -261,3 +261,38 @@ class BenPlanRateServiceIT {
     }
 
 }
+
+
+
+
+
+SQL FILE 
+
+INSERT INTO prospect
+    (id, company_name, hq_address, hq_city, hq_state, hq_postal_code,
+     sales_naics_code, primary_naics_code, benefit_start_date,
+     default_group_id, age_calculation_date, co_company_code, data_setup_status,
+     no_ben_offered)
+VALUES
+    ('IT-BenPlanRateService-Company-01', 'Integration Test Company', '123 Test St', 'Test City',
+     'TS', '12345', '111', '111', CURRENT_DATE, NULL, CURRENT_DATE, NULL, FALSE, FALSE);
+
+INSERT INTO prospect_plan (prospect_id, benefit_type_code, bpl_plan_id, carrier_age_limit)
+VALUES ('IT-BenPlanRateService-Company-01', 'MED', NULL, 25);
+
+
+SENIOR ASKED THIS 
+testBenPlanRate
+
+we are not using this varaible in all test , so why we need to keep this in before each
+
+
+MY RESPOINSE 
+
+yeah correct bro 
+ 
+I’ll move the testBenPlanRate setup out of @BeforeEach and create it only in the tests that need it. That way, each test only sets up the data it actually uses.”  
+
+
+    DID I ANSWERED IT WELL IF YES THEN HOW TO DO THAT ??
+    
